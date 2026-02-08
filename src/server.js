@@ -40,6 +40,9 @@ function isValidInitAmount(amount) {
   return Number.isInteger(amount) && amount >= 0 && amount <= 10_000_000;
 }
 
+/* AWS用ヘルスチェックAPI */
+app.get("/health", (req, res) => res.status(200).send("ok"));
+
 /**
  * トランザクションAPI
  * POST /api/transactions
