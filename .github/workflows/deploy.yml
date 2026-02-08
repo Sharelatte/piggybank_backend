@@ -25,12 +25,12 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::123456789012:role/GitHubActionsDeployRole
+          role-to-assume: arn:aws:iam::435769559532:role/GitHubActionsDeployRole
           aws-region: ap-northeast-1
 
       - name: Sync to S3
         run: |
-          aws s3 sync dist s3://YOUR_BUCKET_NAME --delete
+          aws s3 sync dist s3://piggybank-savingbox-pwa --delete
 
       - name: CloudFront Invalidation
         run: |
