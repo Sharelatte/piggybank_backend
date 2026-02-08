@@ -1,0 +1,37 @@
+name: Deploy PWA
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  id-token: write   # ← OIDCに必須
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/GitHubActionsDeployRole
+          aws-region: ap-northeast-1
+
+      - name: Sync to S3
+        run: |
+          aws s3 sync dist s3://YOUR_BUCKET_NAME --delete
+
+      - name: CloudFront Invalidation
+        run: |
+          aws cloudfront create-invalidation --distribution-id YOUR_DISTRIBUTION_ID --paths "/*"
