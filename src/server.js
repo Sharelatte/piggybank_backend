@@ -1,6 +1,6 @@
 // src/server.js
 // 貯金箱カウンターのAPI実装
-
+const env = require("dotenv").config();
 const express = require("express");
 const cors = require("cors"); 
 const { db } = require("./db");
@@ -12,6 +12,12 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
+
+// ユーザーIDを取得
+function getUserId(req) {
+  // authMiddleware を通った前提
+  return req.user?.userId;
+}
 
 // JSTのISOっぽい文字列を作る（末尾に +09:00 を付ける）
 // とりあえずJSTならこれでOKだが、他地域対応するならライブラリ（dayjs / luxon）推奨
@@ -40,15 +46,66 @@ function isValidInitAmount(amount) {
   return Number.isInteger(amount) && amount >= 0 && amount <= 10_000_000;
 }
 
+// 認証ミドルウェア
+function authMiddleware(req, res, next) {
+  const auth = req.headers.authorization;
+
+  if (!auth?.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const token = auth.split(" ")[1];
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+}
+
 /* AWS用ヘルスチェックAPI */
 app.get("/health", (req, res) => res.status(200).send("ok"));
+
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
+
+// JWT発行API(ログイン)
+app.post("/api/login", async (req, res) => {
+  const { email, password } = req.body ?? {};
+
+  // ユーザーとパスワードが合っていたらJWTを発行
+  const user = db.prepare(
+    "SELECT * FROM users WHERE email = ?"
+  ).get(email);
+
+  if (!user) {
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) {
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+
+  const token = jwt.sign(
+    { userId: user.id },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
+  );
+
+  res.json({ token });
+});
 
 /**
  * トランザクションAPI
  * POST /api/transactions
  * body: { amount, memo? }
  */
-app.post("/api/transactions", (req, res) => {
+app.post("/api/transactions", authMiddleware,(req, res) => {
+
+  const userId = getUserId(req);
 
   // ts は受け取らない(サーバーで付与)
   const { amount, memo } = req.body ?? {};
@@ -77,11 +134,14 @@ app.post("/api/transactions", (req, res) => {
     // prepare() の ? に、run() の引数を左から順番に差し込んでSQL実行
     // memo ?? null は memo が undefined / null のときだけ null にする（空文字 "" はそのまま）
     const insert = db
-     .prepare("INSERT INTO transactions (type, amount, ts, memo, created_at) VALUES (?, ?, ?, ?, ?)")
-     .run("normal", amount, tsValue, memo ?? null, createdAt);
+     .prepare(
+        "INSERT INTO transactions (user_id, type, amount, ts, memo, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+     .run(userId, "normal", amount, tsValue, memo ?? null, createdAt);
 
     // transactionに入っている全データの合計金額を取得する(totalRow.totalで取れる)
-    const totalRow = db.prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM transactions").get();
+    const totalRow = db.prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM transactions WHERE user_id = ?")
+                    .get(userId);
 
     // Response
     return {
@@ -111,7 +171,9 @@ app.post("/api/transactions", (req, res) => {
  * GET /api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD&mode=diff|total&fill=true|false
  */
 
-app.get("/api/summary", (req, res) => {
+app.get("/api/summary", authMiddleware,(req, res) => {
+
+  const userId = getUserId(req);
 
   const { from, to } = req.query;
   const mode = "total"; // 取引の出力形式(差分: diff 総計：total)今回は折線だけなのでtotal固定
@@ -181,7 +243,8 @@ if (g === "day") {
 
   try {
     // 総計金額を取り出す
-    const totalRow = db.prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM transactions").get();
+    const totalRow = db.prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM transactions WHERE user_id = ?")
+                    .get(userId);
 
     // fillなしのSQL
     const sqlBucketNoFill = `
@@ -189,14 +252,16 @@ WITH
 opening AS (
   SELECT COALESCE(SUM(amount), 0) AS opening_total
   FROM transactions
-  WHERE substr(ts, 1, 10) < :from
+  WHERE user_id = :userId
+    AND substr(ts, 1, 10) < :from
 ),
 raw AS (
   SELECT
     substr(ts, 1, 10) AS dateKey,
     amount
   FROM transactions
-  WHERE substr(ts, 1, 10) BETWEEN :from AND :to
+  WHERE user_id = :userId
+    AND substr(ts, 1, 10) BETWEEN :from AND :to
 ),
 bucketed AS (
   SELECT
@@ -214,7 +279,7 @@ FROM bucketed
 ORDER BY date;
 `;
     // fromからtoまでの全区間データを引いてくる
-    const rows = db.prepare(sqlBucketNoFill).all({ from, to });
+    const rows = db.prepare(sqlBucketNoFill).all({ userId, from, to });
 
     // 戻り値
     res.json({
@@ -238,7 +303,10 @@ ORDER BY date;
  * GET /api/transactions?from&to&limit&cursor
  * cursor: last seen id (number)
  */
-app.get("/api/transactions", (req, res) => {
+app.get("/api/transactions", authMiddleware,(req, res) => {
+
+  const userId = getUserId(req);
+
   const from = req.query.from?.toString();
   const to = req.query.to?.toString();
   const limitRaw = req.query.limit?.toString() ?? "50";   // ページング件数
@@ -265,7 +333,8 @@ app.get("/api/transactions", (req, res) => {
     const sql = `
 SELECT id, ts, amount, memo
 FROM transactions
-WHERE (:from IS NULL OR substr(ts, 1, 10) >= :from)
+WHERE user_id = :userId
+  AND (:from IS NULL OR substr(ts, 1, 10) >= :from)
   AND (:to   IS NULL OR substr(ts, 1, 10) <= :to)
   AND (:cursor IS NULL OR id < :cursor)
 ORDER BY id DESC
@@ -274,6 +343,7 @@ LIMIT :limitPlusOne;
 
     // データ引いてくる
     const rows = db.prepare(sql).all({
+      userId,
       from: from ?? null,
       to: to ?? null,
       cursor: cursor ?? null,
@@ -305,15 +375,20 @@ LIMIT :limitPlusOne;
 });
 
 /**
- * 最初の取引一件を取得 直近の日付かnullを返す
+ * 最初の取引一件を取得 最古の日付かnullを返す
  * GET /api/meta
  */
-app.get("/api/meta", (req, res) => {
+app.get("/api/meta", authMiddleware,(req, res) => {
+  
+  const userId = getUserId(req);
+
   try {
     const row = db.prepare(`
       SELECT MIN(substr(ts, 1, 10)) AS minDate
       FROM transactions
-    `).get();
+      WHERE user_id = ?
+    `)
+    .get(userId);
 
     // まだ取引が1件もない場合は null
     res.json({ minDate: row?.minDate ?? null });
@@ -329,8 +404,10 @@ app.get("/api/meta", (req, res) => {
  * {amount, memo}
  */
 
-app.post("/api/initial-balance", (req, res) => {
+app.post("/api/initial-balance", authMiddleware,(req, res) => {
+
   const { amount, memo } = req.body ?? {};
+  const userId = getUserId(req);
 
   // バリデーション
   // 金額
@@ -349,13 +426,15 @@ app.post("/api/initial-balance", (req, res) => {
   // トランザクション開始
   const insertAndGet = db.transaction(() => {
     // 2回目を禁止したいならここでチェックして 409 を返す（今は許可）
-    const insert = db
+  const insert = db
       .prepare(
-        "INSERT INTO transactions (type, amount, ts, memo, created_at) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO transactions (user_id, type, amount, ts, memo, created_at) VALUES (?, ?, ?, ?, ?, ?)"
       )
-      .run("init", amount, tsValue, memo ?? "initial balance", createdAt);
+      .run(userId, "init", amount, tsValue, memo ?? "initial balance", createdAt);
 
-    const totalRow = db.prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM transactions").get();
+    const totalRow = db
+      .prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM transactions WHERE user_id = ?")
+      .get(userId);
 
     return {
       transaction: {

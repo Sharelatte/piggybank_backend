@@ -11,7 +11,7 @@ db.pragma("journal_mode = WAL");
 
 // すべてのデータを削除
 db.exec(`
-  DELETE FROM transactions;`
+  DELETE FROM transactions WHERE user_id = 1;`
 );
 
 module.exports = { db };

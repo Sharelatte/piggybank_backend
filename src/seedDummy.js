@@ -8,6 +8,10 @@ const db = new Database(dbPath);
 
 db.pragma("journal_mode = WAL");
 
+// データを差し込むユーザID
+const user = 1;
+
+
 // JST ISO文字列っぽい文字列を作成
 // とりあえずJSTならこれでOKだが、他地域対応するならライブラリ（dayjs / luxon）推奨
 
@@ -31,9 +35,10 @@ start.setFullYear(today.getFullYear() - 1);
 
 // DBにレコードを登録用SQL
 const insert = db.prepare(`
-  INSERT INTO transactions (amount, ts, memo, created_at)
-  VALUES (?, ?, ?, ?)
+  INSERT INTO transactions (user_id, amount, ts, memo, created_at)
+  VALUES (?, ?, ?, ?, ?)
 `);
+
 
 // DBトランザクション開始
 const tx = db.transaction(() => {
@@ -60,6 +65,7 @@ const tx = db.transaction(() => {
 
       // レコード登録
       insert.run(
+        user,
         amount,
         iso,
         "dummy",
