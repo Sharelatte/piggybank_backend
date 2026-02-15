@@ -36,9 +36,11 @@ function isYYYYMMDD(s) {
   return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-// 通常時の取引登録
+// 通常時の取引登録 金額縛りをなくした（2/14)
 function isValidNormalAmount(amount) {
-  return amount === 500 || amount === -500 || amount === 1 || amount === -1;
+//  return amount === 500 || amount === -500 || amount === 1 || amount === -1;
+  return amount > 0;
+
 }
 
 // 初期金額登録
