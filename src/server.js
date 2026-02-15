@@ -11,7 +11,7 @@ app.use(cors());
 // 「リクエストのJSONボディを読み取れるようにする」ミドルウェアを登録
 app.use(express.json());
 
-// for test
+// X-API-Versionをつける
 app.use((req, res, next) => {
   res.setHeader("X-API-Version", "2026-02-15-13:45"); // 適当に更新
   next();
@@ -46,7 +46,7 @@ function isYYYYMMDD(s) {
 // 通常時の取引登録 金額縛りをなくした（2/14)
 function isValidNormalAmount(amount) {
 //  return amount === 500 || amount === -500 || amount === 1 || amount === -1;
-  return amount > 0;
+  return Number.isInteger(amount) && amount !== 0;
 
 }
 
@@ -127,7 +127,7 @@ app.post("/api/transactions", authMiddleware,(req, res) => {
   // バリデーションを通す
   // 通常取引
   if (!isValidNormalAmount(amount)) {
-    return res.status(400).json({ error: "amount must be one of 500, -500, 1, -1" });
+    return res.status(400).json({ error: "amount must be a non-zero integer" });
   }
   // メモ
   if (memo != null && typeof memo !== "string") {
