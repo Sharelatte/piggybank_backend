@@ -11,6 +11,13 @@ app.use(cors());
 // 「リクエストのJSONボディを読み取れるようにする」ミドルウェアを登録
 app.use(express.json());
 
+// for test
+app.use((req, res, next) => {
+  res.setHeader("X-API-Version", "2026-02-15-13:45"); // 適当に更新
+  next();
+});
+
+
 const PORT = process.env.PORT || 3000;
 
 // ユーザーIDを取得
