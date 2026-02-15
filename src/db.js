@@ -24,30 +24,27 @@ function hasColumn(tableName, columnName) {
  */
 function initTables() {
   // users テーブル
-  db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY,
-  email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-`);
-
-  // transactions テーブル（既存の形を維持しつつ IF NOT EXISTS）
-  db.exec(`
+db.exec(`
 CREATE TABLE IF NOT EXISTS transactions (
   id         INTEGER PRIMARY KEY,
-  type       TEXT    NOT NULL DEFAULT 'normal', -- 'normal' | 'init'
+  user_id    INTEGER NOT NULL,
+  type       TEXT    NOT NULL DEFAULT 'normal' CHECK (type IN ('normal','init')),
   amount     INTEGER NOT NULL,
-  ts         TEXT    NOT NULL, -- ISO 8601 (JST)
+  ts         TEXT    NOT NULL,
   memo       TEXT,
-  created_at TEXT    NOT NULL
+  created_at TEXT    NOT NULL,
+  CHECK (
+    (type='normal' AND amount >= 1)
+    OR
+    (type='init' AND amount >= 0)
+  ),
+  CHECK (memo IS NULL OR length(memo) <= 100),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_transactions_ts ON transactions(ts);
-CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+CREATE INDEX IF NOT EXISTS idx_transactions_ts      ON transactions(ts);
+CREATE INDEX IF NOT EXISTS idx_transactions_type    ON transactions(type);
+CREATE INDEX IF NOT EXISTS idx_transactions_user_ts ON transactions(user_id, ts);
 `);
 }
 
