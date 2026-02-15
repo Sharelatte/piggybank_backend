@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   memo       TEXT,
   created_at TEXT    NOT NULL,
   CHECK (
-    (type='normal' AND amount >= 1)
+    (type='normal' AND amount != 1)
     OR
     (type='init' AND amount >= 0)
   ),
