@@ -459,7 +459,6 @@ app.post("/api/initial-balance", authMiddleware,(req, res) => {
   }
 });
 
-
-app.listen(PORT, () => {
-  console.log(`API listening on http://localhost:${PORT}`);
+app.listen(PORT, "127.0.0.1", () => {
+  console.log(`API listening on http://127.0.0.1:${PORT}`);
 });
